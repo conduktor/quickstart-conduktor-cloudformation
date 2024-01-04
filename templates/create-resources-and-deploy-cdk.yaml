@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Create resources and deploy Conduktor
+  As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
+Resources:
+  MasterPasswordSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: DBSecret
+      Description: "This secret is dynamically generated."
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "conduktor"}'
+        GenerateStringKey: "password"
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'
+      Tags:
+        -
+          Key: app
+          Value: ConduktorDB
+  RootRole: 
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Principal: 
+              Service: 
+                - "rds.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+      Tags:
+        -
+          Key: app
+          Value: ConduktorDB
+  RolePolicies: 
+    Type: "AWS::IAM::Policy"
+    Properties: 
+      PolicyName: "root"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Action: "*"
+            Resource: !Ref MasterPasswordSecret
+      Roles: 
+        - Ref: "RootRole"
+  RootInstanceProfile: 
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+      Path: "/"
+      Roles: 
+        - Ref: "RootRole"
+  PostgresDB:
+    Type: AWS::RDS::DBInstance
+    DependsOn: RolePolicies
+    Properties:
+      AllocatedStorage: '5'
+      DBInstanceClass: db.t2.small
+      Engine: MySQL
+      MasterUsername: conduktor
+      ManageMasterUserPassword: true
+      MasterUserSecret:
+         SecretArn: !Ref MasterPasswordSecret
+      Tags:
+        -
+          Key: app
+          Value: ConduktorDB
+    DeletionPolicy: Snapshot
+  ECSCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: conduktor-ecs
+      Tags:
+        -
+          Key: app
+          Value: ConduktorDB
+  ECSService: 
+    Type: AWS::ECS::Service
+    Properties: 
+      Cluster: !Ref ECSCluster
+      DesiredCount: 1
+      # NetworkConfiguration:
+      # AwsvpcConfiguration:
+      #   AssignPublicIp: ENABLED
+      #   SecurityGroups:
+      #     - sg-abcdef01234567890
+      #   Subnets:
+      #     - subnet-abcdef01234567890
+      TaskDefinition: !Ref ECSTaskDefinition
+  ECSTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    DependsOn: ECSCluster
+    Properties:
+      # RequiresCompatibilities:
+      #   - FARGATE
+      # NetworkMode: awsvpc
+      Cpu: 2 vCPU
+      Memory: 4 GB
+      Family: cdk
+      ContainerDefinitions:
+        - Name: conduktor-console
+          Image: 'conduktor/conduktor-platform:1.19.2'
+          Essential: true
+          PortMappings:
+            - HostPort: 80
+              Protocol: tcp
+              ContainerPort: 80
+        - Name: conduktor-monitoring
+          Image: 'conduktor/conduktor-platform-cortex:1.19.2'
+          PortMappings:
+              - ContainerPort: 9090
+                Protocol: tcp
+              - ContainerPort: 9010
+                Protocol: tcp
+              - ContainerPort: 9009
+                Protocol: tcp
+      Tags:
+        -
+          Key: app
+          Value: ConduktorDB
