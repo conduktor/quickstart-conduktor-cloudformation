@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Create resources and deploy Conduktor
+  As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
+
+  This template will assume you have a RDS Database and a ECS cluster running!
+
+  This template will deploy the following:
+  - Networking resources (VPC, subnets and more) - Public
+  - Service (Fargate)
+  - IAM (ECS Task Execution Role)
+
+  **Please fill the values below**
+  
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: '10.10.0.0/16'
+    Public:
+      CIDR: '10.10.0.0/24'
+  Other:
+    DB:
+      Arn: ""
+      Username: ""
+      Password: ""
+    Cluster:
+      Arn: ""
+      
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap ['SubnetConfig', 'VPC', 'CIDR']
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !FindInMap ['SubnetConfig', 'Public', 'CIDR']
+      VpcId: !Ref VPC
+      AvailabilityZone: eu-west-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+       - Key: Name
+         Value: PublicSubnet
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+  
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+  
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubne1Association:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
+  
+  ECSService:    
+    Type: AWS::ECS::Service
+    DependsOn:
+    Properties: 
+      Cluster: !FindInMap ['Other', 'Cluster', 'Arn']
+      DesiredCount: 1
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: 
+            - !Ref PublicSubnet
+ 
+      TaskDefinition: !Ref 'ECSTaskDefinition'
+  
+  ECSTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      Cpu: 2 vCPU
+      Memory: 4 GB
+      Family: cdk
+      ContainerDefinitions:
+        - Name: conduktor-console
+          Image: conduktor/conduktor-platform:latest
+          Essential: true
+          Environment:
+            - Name: CDK_ADMIN_EMAIL
+              Value: !FindInMap ['Other', 'DB', 'Username']
+            - Name: CDK_ADMIN_PASSWORD
+              Value: !FindInMap ['Other', 'DB', 'Password']
+            - Name: CDK_DATABASE_HOST
+              Value: !FindInMap ['Other', 'DB', 'Arn']
+            - Name: CDK_DATABASE_NAME
+              Value: postgres
+            - Name: CDK_DATABASE_PORT
+              Value: 5432
+            - Name: CDK_DATABASE_USERNAME
+              Value: conduktor
+            - Name: CDK_MONITORING_ALERT
+              Value: http://localhost:9010/
+            - Name: CDK_MONITORING_CALLBACK
+              Value: http://localhost:8080/monitoring/api/
+            - Name: CDK_MONITORING_CORTEX
+              Value: http://localhost:9009/
+            - Name: CDK_MONITORING_NOTIFICATIONS-CALLBACK-URL
+              Value: http://localhost:8080
+          PortMappings:
+            - Name: conduktor-8080-tcp
+              HostPort: 80
+              Protocol: http
+              ContainerPort: 80
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: 'conduktor-full'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: 'conduktor-full'
+          HealthCheck:
+            Command:  [ "CMD-SHELL", "curl -f http://localhost/ || exit 1" ]
+            Interval: 5
+            Retries: 2
+            Timeout: 3
+        - Name: conduktor-monitoring
+          Image: conduktor/conduktor-platform-cortex:latest
+          Environment:
+            - Name: CDK_CONSOLE-URL
+              Value: http://localhost:8080
+          PortMappings:
+              - Name: conduktor-cortex-9090-tcp
+                ContainerPort: 9090
+                Protocol: tcp
+              - Name:  conduktor-cortex-9010-tcp
+                ContainerPort: 9010
+                Protocol: tcp
+              - Name: conduktor-cortex-9009-tcp
+                ContainerPort: 9009
+                Protocol: tcp
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: 'conduktor-full'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: 'conduktor-full'
+          HealthCheck:
+            Command:  [ "CMD-SHELL", "curl -f http://localhost/ || exit 1" ]
+            Interval: 5
+            Retries: 2
+            Timeout: 3
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs-tasks.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: AmazonECSTaskExecutionRolePolicy
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                # Allow the ECS Tasks to download images from ECR
+                - 'ecr:GetAuthorizationToken'
+                - 'ecr:BatchCheckLayerAvailability'
+                - 'ecr:GetDownloadUrlForLayer'
+                - 'ecr:BatchGetImage'
+
+                # Allow the ECS tasks to upload logs to CloudWatch
+                - 'logs:CreateLogStream'
+                - 'logs:PutLogEvents'
+              Resource: '*'
