@@ -1,0 +1,268 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >-
+  Create resources and deploy Conduktor
+  As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
+
+  This template will deploy the following:
+  - Networking resources (VPC, subnets and more) - Public
+  - Database (RDS instance with postgres engine)
+  - Cluster (ECS)
+  - Service (Fargate)
+  - IAM (ECS Task Execution Role)
+
+Parameters:
+  AdminEmail:
+    Type: String
+    Default:  bob@conduktor.io
+    Description: The username for the admin account
+
+  AdminPassword:
+    Type: String
+    Default: admin
+    Description:  The password for the admin account
+  
+  Region:
+    Type: String
+    Default: eu-west-1c
+    Description: The region for availability zone of your VPC
+
+  DatabaseUsername:
+    Type: String
+    Default: conduktor
+    Description: The username for the database
+
+  DatabasePassword:
+    Type: String
+    Default: conduktor2143
+    Description: The password for the database
+
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: '10.10.0.0/16'
+    Public:
+      CIDR: '10.10.1.0/24'
+    Destination:
+      CIDR: '0.0.0.0/0'
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap ['SubnetConfig', 'VPC', 'CIDR']
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !FindInMap ['SubnetConfig', 'Public', 'CIDR']
+      VpcId: !Ref VPC
+      AvailabilityZone: !Ref Region
+      MapPublicIpOnLaunch: true
+      Tags:
+       - Key: Name
+         Value: PublicSubnet
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+  
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+  
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - AttachGateway
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
+
+  ECSCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: conduktor-ecs
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+      - CapacityProvider: FARGATE
+        Weight: 1
+  
+  ECSService:    
+    Type: AWS::ECS::Service
+    Properties: 
+      Cluster: !Ref ECSCluster
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: 
+            - !Ref SecurityGroup
+          Subnets: 
+            - !Ref PublicSubnet
+      TaskDefinition: !Ref 'ECSTaskDefinition'
+  
+  ECSTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: conduktor-console
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      Cpu: '2048'
+      Memory: '4096'
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: conduktor-console
+          Image: conduktor/conduktor-platform:1.20.0
+          Essential: true
+          Environment:
+            - Name: CDK_ADMIN_EMAIL
+              Value: !Ref 'AdminEmail'
+            - Name: CDK_ADMIN_PASSWORD
+              Value: !Ref 'AdminPassword'
+            - Name: CDK_DATABASE_HOST
+              Value: !Ref RDSInstance
+            - Name: CDK_MONITORING_ALERT-MANAGER-URL
+              Value: http://localhost:9010/
+            - Name: CDK_MONITORING_CORTEX-URL
+              Value: http://localhost:9009/
+            - Name: CDK_DATABASE_PORT
+              Value: '5432'
+            - Name: CDK_DATABASE_USERNAME
+              Value: !Ref 'DatabaseUsername'
+            - Name: CDK_DATABASE_PASSWORD
+              Value: !Ref 'DatabasePassword'
+            - Name: CDK_MONITORING_CALLBACK-URL
+              Value: http://localhost:8080/monitoring/api/
+            - Name: CDK_DATABASE_NAME
+              Value: postgres
+            - Name: CDK_MONITORING_NOTIFICATIONS-CALLBACK-URL
+              Value: http://localhost:8080
+          PortMappings:
+            - Name: console-8080-tcp
+              ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          HealthCheck:
+            Command: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+            Interval: 5
+            Retries: 2
+            Timeout: 3
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+        - Name: conduktor-monitoring
+          Image: conduktor/conduktor-platform-cortex:latest
+          Environment:
+            - Name: CDK_CONSOLE-URL
+              Value: http://localhost:8080
+          PortMappings:
+              - Name: conduktor-cortex-9090-tcp
+                ContainerPort: 9090
+                HostPort: 9090
+              - Name:  conduktor-cortex-9010-tcp
+                ContainerPort: 9010
+                HostPort: 9010
+              - Name: conduktor-cortex-9009-tcp
+                ContainerPort: 9009
+                HostPort: 9009
+          HealthCheck:
+            Command: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+            Interval: 5
+            Retries: 2
+            Timeout: 3
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: 'conduktor-full'
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: SecurityGroup
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+        - IpProtocol: -1
+          FromPort: 9090
+          ToPort: 9090
+          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+        - IpProtocol: -1
+          FromPort: 9010
+          ToPort: 9010
+          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+        - IpProtocol: -1
+          FromPort: 9009
+          ToPort: 9009
+          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+      # https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonECSTaskExecutionRolePolicy.html
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: sample-cloudformation-postgresql
+      DBName: SampleCloudFormationPostgreSQL
+      Engine: postgres
+      MultiAZ: false
+      MasterUsername: !Ref 'DatabaseUsername'
+      MasterUserPassword: !Ref 'DatabasePassword'
+      AllocatedStorage: '5'
+      DBInstanceClass: 'db.t3.small'
+      MultiAZ: false
