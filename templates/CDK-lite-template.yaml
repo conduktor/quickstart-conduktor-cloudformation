@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Create resources and deploy Conduktor
+  As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
+
+  This template will assume you have a VPC (+subnet),Security Group, RDS Database and a ECS cluster running!
+
+  This template will deploy the following:
+  - Service (Fargate)
+  - Service Task
+  - Log group for your service
+  - IAM (ECS Task Execution Role)
+
+  **Please fill the values below**
+  
+
+Parameters:
+  ClusterArn:
+    Type: String
+    Description: The ARN value for your cluster
+
+  SecurityGroup:
+    Type: String
+    Description: The Security Group to have access to this ECS service
+
+  Subnet:
+    Type: String
+    Description: The Subnet you want to use for this ECS service
+
+  DatabaseUsername:
+    Type: String
+    Description: The username for the database
+
+  DatabasePassword:
+    Type: String
+    Description: The password for the database
+
+  DatabaseEndpoint:
+    Type: String
+    Description: The endpoint for the database
+
+  AdminEmail:
+    Type: String
+    Default:  bob@conduktor.io
+    Description: The username for the admin account
+
+  AdminPassword:
+    Type: String
+    Default: admin
+    Description:  The password for the admin account
+    
+Resources:
+  ECSService:    
+    Type: AWS::ECS::Service
+    Properties: 
+      Cluster: !Ref ClusterArn
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: 
+            - !Ref SecurityGroup
+          Subnets: 
+            - !Ref Subnet
+      TaskDefinition: !Ref 'ECSTaskDefinition'
+  
+  ECSTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: conduktor-console
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      Cpu: '2048'
+      Memory: '4096'
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: conduktor-console
+          Image: conduktor/conduktor-platform:1.20.0
+          Essential: true
+          Environment:
+            - Name: CDK_ADMIN_EMAIL
+              Value: !Ref 'AdminEmail'
+            - Name: CDK_ADMIN_PASSWORD
+              Value: !Ref 'AdminPassword'
+            - Name: CDK_DATABASE_HOST
+              Value: !Ref RDSInstance
+            - Name: CDK_MONITORING_ALERT-MANAGER-URL
+              Value: http://localhost:9010/
+            - Name: CDK_MONITORING_CORTEX-URL
+              Value: http://localhost:9009/
+            - Name: CDK_DATABASE_PORT
+              Value: '5432'
+            - Name: CDK_DATABASE_USERNAME
+              Value: !Ref 'DatabaseUsername'
+            - Name: CDK_DATABASE_PASSWORD
+              Value: !Ref 'DatabasePassword'
+            - Name: CDK_MONITORING_CALLBACK-URL
+              Value: http://localhost:8080/monitoring/api/
+            - Name: CDK_DATABASE_NAME
+              Value: postgres
+            - Name: CDK_MONITORING_NOTIFICATIONS-CALLBACK-URL
+              Value: http://localhost:8080
+          PortMappings:
+            - Name: console-8080-tcp
+              ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          HealthCheck:
+            Command: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+            Interval: 5
+            Retries: 2
+            Timeout: 3
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+        - Name: conduktor-monitoring
+          Image: conduktor/conduktor-platform-cortex:latest
+          Environment:
+            - Name: CDK_CONSOLE-URL
+              Value: http://localhost:8080
+          PortMappings:
+              - Name: conduktor-cortex-9090-tcp
+                ContainerPort: 9090
+                HostPort: 9090
+              - Name:  conduktor-cortex-9010-tcp
+                ContainerPort: 9010
+                HostPort: 9010
+              - Name: conduktor-cortex-9009-tcp
+                ContainerPort: 9009
+                HostPort: 9009
+          HealthCheck:
+            Command: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+            Interval: 5
+            Retries: 2
+            Timeout: 3
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: 'conduktor-full'
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+      # https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonECSTaskExecutionRolePolicy.html
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
