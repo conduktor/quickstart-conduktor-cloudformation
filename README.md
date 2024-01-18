@@ -1,4 +1,4 @@
-# Quickstart Conduktor CloudFormation
+# Quickstart Conduktor CloudFormation 🚀
 
 This repository holds two AWS CloudFormation templates that enable you to deploy Conduktor in two different ways:
 

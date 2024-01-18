@@ -152,7 +152,7 @@ Resources:
             - Name: CDK_ADMIN_PASSWORD
               Value: !Ref 'AdminPassword'
             - Name: CDK_DATABASE_HOST
-              Value: !Ref RDSInstance
+              Value: !GetAtt RDSInstance.Endpoint.Address
             - Name: CDK_MONITORING_ALERT-MANAGER-URL
               Value: http://localhost:9010/
             - Name: CDK_MONITORING_CORTEX-URL
@@ -253,6 +253,12 @@ Resources:
       # https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonECSTaskExecutionRolePolicy.html
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
 
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: description
+      SubnetIds: !Ref PublicSubnet
+
   RDSInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
@@ -260,9 +266,9 @@ Resources:
       DBInstanceIdentifier: sample-cloudformation-postgresql
       DBName: SampleCloudFormationPostgreSQL
       Engine: postgres
-      MultiAZ: false
       MasterUsername: !Ref 'DatabaseUsername'
       MasterUserPassword: !Ref 'DatabasePassword'
       AllocatedStorage: '5'
       DBInstanceClass: 'db.t3.small'
       MultiAZ: false
+      DBSubnetGroupName: !Ref DBSubnetGroup

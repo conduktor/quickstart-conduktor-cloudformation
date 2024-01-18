@@ -12,7 +12,6 @@ Description: >-
   - IAM (ECS Task Execution Role)
 
   **Please fill the values below**
-  
 
 Parameters:
   ClusterArn:
@@ -88,7 +87,7 @@ Resources:
             - Name: CDK_ADMIN_PASSWORD
               Value: !Ref 'AdminPassword'
             - Name: CDK_DATABASE_HOST
-              Value: !Ref RDSInstance
+              Value: !GetAtt RDSInstance.Endpoint.Address
             - Name: CDK_MONITORING_ALERT-MANAGER-URL
               Value: http://localhost:9010/
             - Name: CDK_MONITORING_CORTEX-URL
@@ -151,7 +150,7 @@ Resources:
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: 'conduktor-full'
+      LogGroupName: 'conduktor-lite'
 
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
