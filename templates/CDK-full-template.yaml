@@ -107,7 +107,7 @@ Resources:
   ECSCluster:
     Type: 'AWS::ECS::Cluster'
     Properties:
-      ClusterName: conduktor-ecs
+      ClusterName: !Sub ${AWS::StackName}-conduktor-ecs-cluster
       CapacityProviders:
         - FARGATE
       DefaultCapacityProviderStrategy:
@@ -263,7 +263,7 @@ Resources:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
     Properties:
-      DBInstanceIdentifier: sample-cloudformation-postgresql
+      DBInstanceIdentifier: !Sub ${AWS::StackName}-conduktor-postgresql
       DBName: SampleCloudFormationPostgreSQL
       Engine: postgres
       MasterUsername: !Ref 'DatabaseUsername'
@@ -271,4 +271,4 @@ Resources:
       AllocatedStorage: '5'
       DBInstanceClass: 'db.t3.small'
       MultiAZ: false
-      DBSubnetGroupName: !Ref DBSubnetGroup
+      AvailabilityZone: !Ref Region
