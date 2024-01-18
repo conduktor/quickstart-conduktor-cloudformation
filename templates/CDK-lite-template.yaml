@@ -110,7 +110,8 @@ Resources:
               HostPort: 8080
               Protocol: tcp
           HealthCheck:
-            Command: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+            Command: ['CMD-SHELL',
+                    'curl --fail http://localhost:${CDK_LISTENING_PORT:-8080}/platform/api/modules/health/live']            
             Interval: 5
             Retries: 2
             Timeout: 3
@@ -136,7 +137,8 @@ Resources:
                 ContainerPort: 9009
                 HostPort: 9009
           HealthCheck:
-            Command: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+            Command: ['CMD-SHELL',
+                    'curl --fail http://localhost:${CDK_LISTENING_PORT:-8080}/platform/api/modules/health/live']
             Interval: 5
             Retries: 2
             Timeout: 3
