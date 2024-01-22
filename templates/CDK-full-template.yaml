@@ -27,6 +27,11 @@ Parameters:
     Default: eu-west-1c
     Description: The region for availability zone of your VPC
 
+  DatabaseName:
+    Type: String
+    Default: postgres
+    Description: The name of the database
+
   DatabaseUsername:
     Type: String
     Default: conduktor
@@ -41,8 +46,10 @@ Mappings:
   SubnetConfig:
     VPC:
       CIDR: '10.10.0.0/16'
-    Public:
+    PublicOne:
       CIDR: '10.10.1.0/24'
+    PublicTwo:
+      CIDR: '10.10.2.0/24'
     Destination:
       CIDR: '0.0.0.0/0'
 
@@ -57,16 +64,27 @@ Resources:
         - Key: Name
           Value: VPC
 
-  PublicSubnet:
+  PublicSubnetTwo:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: !FindInMap ['SubnetConfig', 'Public', 'CIDR']
+      CidrBlock: !FindInMap ['SubnetConfig', 'PublicTwo', 'CIDR']
       VpcId: !Ref VPC
       AvailabilityZone: !Ref Region
       MapPublicIpOnLaunch: true
       Tags:
        - Key: Name
-         Value: PublicSubnet
+         Value: PublicSubnetTwo
+  
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !FindInMap ['SubnetConfig', 'PublicOne', 'CIDR']
+      VpcId: !Ref VPC
+      AvailabilityZone: eu-west-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+       - Key: Name
+         Value: PublicSubnetOne
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -101,13 +119,13 @@ Resources:
   PublicSubnetAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet
+      SubnetId: !Ref PublicSubnetTwo
       RouteTableId: !Ref RouteTable
 
   ECSCluster:
     Type: 'AWS::ECS::Cluster'
     Properties:
-      ClusterName: conduktor-ecs
+      ClusterName: !Sub ${AWS::StackName}-conduktor-ecs-cluster
       CapacityProviders:
         - FARGATE
       DefaultCapacityProviderStrategy:
@@ -126,7 +144,7 @@ Resources:
           SecurityGroups: 
             - !Ref SecurityGroup
           Subnets: 
-            - !Ref PublicSubnet
+            - !Ref PublicSubnetTwo
       TaskDefinition: !Ref 'ECSTaskDefinition'
   
   ECSTaskDefinition:
@@ -152,7 +170,7 @@ Resources:
             - Name: CDK_ADMIN_PASSWORD
               Value: !Ref 'AdminPassword'
             - Name: CDK_DATABASE_HOST
-              Value: !Ref RDSInstance
+              Value: !GetAtt RDSInstance.Endpoint.Address
             - Name: CDK_MONITORING_ALERT-MANAGER-URL
               Value: http://localhost:9010/
             - Name: CDK_MONITORING_CORTEX-URL
@@ -166,7 +184,7 @@ Resources:
             - Name: CDK_MONITORING_CALLBACK-URL
               Value: http://localhost:8080/monitoring/api/
             - Name: CDK_DATABASE_NAME
-              Value: postgres
+              Value: !Ref DatabaseName
             - Name: CDK_MONITORING_NOTIFICATIONS-CALLBACK-URL
               Value: http://localhost:8080
           PortMappings:
@@ -225,21 +243,25 @@ Resources:
       VpcId: !Ref VPC
       GroupDescription: SecurityGroup
       SecurityGroupIngress:
-        - IpProtocol: -1
+        - IpProtocol: tcp
           FromPort: 8080
           ToPort: 8080
           CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
-        - IpProtocol: -1
+        - IpProtocol: tcp
           FromPort: 9090
           ToPort: 9090
           CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
-        - IpProtocol: -1
+        - IpProtocol: tcp
           FromPort: 9010
           ToPort: 9010
           CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
-        - IpProtocol: -1
+        - IpProtocol: tcp
           FromPort: 9009
           ToPort: 9009
+          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
           CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
 
   ECSTaskExecutionRole:
@@ -255,16 +277,28 @@ Resources:
       # https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonECSTaskExecutionRolePolicy.html
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
 
+#  DB needs two subnets in different AZs
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub ${AWS::StackName}-conduktor-db-subnet-group
+      SubnetIds:
+        - !Ref PublicSubnetOne
+        - !Ref PublicSubnetTwo
+
   RDSInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
     Properties:
-      DBInstanceIdentifier: sample-cloudformation-postgresql
-      DBName: SampleCloudFormationPostgreSQL
+      DBInstanceIdentifier: !Sub ${AWS::StackName}-conduktor-postgresql
+      DBName: !Ref DatabaseName
       Engine: postgres
-      MultiAZ: false
       MasterUsername: !Ref 'DatabaseUsername'
       MasterUserPassword: !Ref 'DatabasePassword'
       AllocatedStorage: '5'
       DBInstanceClass: 'db.t3.small'
       MultiAZ: false
+      AvailabilityZone: !Ref Region
+      VPCSecurityGroups:
+        - !Ref SecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
