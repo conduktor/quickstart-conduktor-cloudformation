@@ -5,26 +5,21 @@ Description: >-
   As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
 
   This template will deploy the following:
-  - Networking resources (VPC, subnets and more) - Public
+  - Networking resources (VPC, subnets and more) - Public and Private
   - Database (RDS instance with postgres engine)
   - Cluster (ECS)
   - Service (Fargate)
   - IAM (ECS Task Execution Role)
 
 Parameters:
-  AdminEmail:
+  PublicRegion:
     Type: String
-    Default:  bob@conduktor.io
-    Description: The username for the admin account
+    Default: eu-west-1a
+    Description: The region for availability zone of your VPC
 
-  AdminPassword:
+  PrivateRegion:
     Type: String
-    Default: admin
-    Description:  The password for the admin account
-  
-  Region:
-    Type: String
-    Default: eu-west-1c
+    Default: eu-west-1b
     Description: The region for availability zone of your VPC
 
   DatabaseName:
@@ -46,9 +41,9 @@ Mappings:
   SubnetConfig:
     VPC:
       CIDR: '10.10.0.0/16'
-    PublicOne:
+    Public:
       CIDR: '10.10.1.0/24'
-    PublicTwo:
+    Private:
       CIDR: '10.10.2.0/24'
     Destination:
       CIDR: '0.0.0.0/0'
@@ -62,36 +57,36 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: VPC
+          Value: ConduktorConsoleVPC
 
-  PublicSubnetTwo:
+  PublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: !FindInMap ['SubnetConfig', 'PublicTwo', 'CIDR']
+      CidrBlock: !FindInMap ['SubnetConfig', 'Public', 'CIDR']
       VpcId: !Ref VPC
-      AvailabilityZone: !Ref Region
+      AvailabilityZone: !Ref PublicRegion
       MapPublicIpOnLaunch: true
       Tags:
        - Key: Name
-         Value: PublicSubnetTwo
-  
-  PublicSubnetOne:
+         Value: ConduktorConsolePublicSubnet
+
+  PrivateSubnet:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: !FindInMap ['SubnetConfig', 'PublicOne', 'CIDR']
+      CidrBlock: !FindInMap ['SubnetConfig', 'Private', 'CIDR']
       VpcId: !Ref VPC
-      AvailabilityZone: eu-west-1a
+      AvailabilityZone: !Ref PrivateRegion
       MapPublicIpOnLaunch: true
       Tags:
        - Key: Name
-         Value: PublicSubnetOne
+         Value: ConduktorConsolePrivateSubnet
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: InternetGateway
+          Value: ConduktorConsoleInternetGateway
   
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -103,9 +98,6 @@ Resources:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: PublicRouteTable
   
   PublicRoute:
     Type: AWS::EC2::Route
@@ -119,7 +111,7 @@ Resources:
   PublicSubnetAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnetTwo
+      SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref RouteTable
 
   ECSCluster:
@@ -131,7 +123,7 @@ Resources:
       DefaultCapacityProviderStrategy:
       - CapacityProvider: FARGATE
         Weight: 1
-  
+
   ECSService:    
     Type: AWS::ECS::Service
     Properties: 
@@ -144,9 +136,10 @@ Resources:
           SecurityGroups: 
             - !Ref SecurityGroup
           Subnets: 
-            - !Ref PublicSubnetTwo
+            - !Ref PublicSubnet
       TaskDefinition: !Ref 'ECSTaskDefinition'
-  
+      ServiceName: !Sub ${AWS::StackName}-conduktor-ecs-service
+
   ECSTaskDefinition:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
@@ -165,10 +158,6 @@ Resources:
           Image: conduktor/conduktor-platform:1.20.0
           Essential: true
           Environment:
-            - Name: CDK_ADMIN_EMAIL
-              Value: !Ref 'AdminEmail'
-            - Name: CDK_ADMIN_PASSWORD
-              Value: !Ref 'AdminPassword'
             - Name: CDK_DATABASE_HOST
               Value: !GetAtt RDSInstance.Endpoint.Address
             - Name: CDK_MONITORING_ALERT-MANAGER-URL
@@ -236,6 +225,9 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: 'conduktor-full'
+      Tags:
+        - Key: Name
+          Value: ConduktorConsoleLogGroup
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -263,6 +255,9 @@ Resources:
           FromPort: 5432
           ToPort: 5432
           CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+      Tags:
+        - Key: Name
+          Value: ConduktorConsoleSecurityGroup
 
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
@@ -276,6 +271,9 @@ Resources:
       ManagedPolicyArns:
       # https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonECSTaskExecutionRolePolicy.html
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Tags:
+        - Key: Name
+          Value: ConduktorConsoleECSTaskExecutionRole
 
 #  DB needs two subnets in different AZs
   DBSubnetGroup:
@@ -283,8 +281,8 @@ Resources:
     Properties:
       DBSubnetGroupDescription: !Sub ${AWS::StackName}-conduktor-db-subnet-group
       SubnetIds:
-        - !Ref PublicSubnetOne
-        - !Ref PublicSubnetTwo
+        - !Ref PublicSubnet
+        - !Ref PrivateSubnet
 
   RDSInstance:
     Type: AWS::RDS::DBInstance
@@ -298,7 +296,7 @@ Resources:
       AllocatedStorage: '5'
       DBInstanceClass: 'db.t3.small'
       MultiAZ: false
-      AvailabilityZone: !Ref Region
+      AvailabilityZone: !Ref PublicRegion
       VPCSecurityGroups:
         - !Ref SecurityGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
