@@ -15,12 +15,12 @@ Parameters:
   PublicRegion:
     Type: String
     Default: eu-west-1a
-    Description: The region for availability zone of your VPC
+    Description: The public region for availability zone of your resources
 
   PrivateRegion:
     Type: String
     Default: eu-west-1b
-    Description: The region for availability zone of your VPC
+    Description: The private region for availability zone of your resources
 
   DatabaseName:
     Type: String

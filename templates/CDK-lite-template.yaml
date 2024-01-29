@@ -85,7 +85,7 @@ ECSTaskDefinition:
           Essential: true
           Environment:
             - Name: CDK_DATABASE_HOST
-              Value: !GetAtt RDSInstance.Endpoint.Address
+              Value: !Ref DatabaseEndpoint
             - Name: CDK_MONITORING_ALERT-MANAGER-URL
               Value: http://localhost:9010/
             - Name: CDK_MONITORING_CORTEX-URL
