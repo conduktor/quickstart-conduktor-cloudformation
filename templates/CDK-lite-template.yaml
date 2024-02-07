@@ -150,7 +150,7 @@ ECSTaskDefinition:
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: 'conduktor-lite'
+      LogGroupName: Sub ${AWS::StackName}-conduktor-lite
       Tags:
         - Key: Name
           Value: ConduktorConsoleLogGroup
