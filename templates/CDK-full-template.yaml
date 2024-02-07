@@ -224,7 +224,7 @@ Resources:
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: 'conduktor-full'
+      LogGroupName: !Sub ${AWS::StackName}-conduktor-full
       Tags:
         - Key: Name
           Value: ConduktorConsoleLogGroup
