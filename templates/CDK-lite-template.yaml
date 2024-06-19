@@ -81,7 +81,7 @@ ECSTaskDefinition:
         OperatingSystemFamily: LINUX
       ContainerDefinitions:
         - Name: conduktor-console
-          Image: conduktor/conduktor-console:1.23.0
+          Image: conduktor/conduktor-console:1.24.0
           Essential: true
           Environment:
             - Name: CDK_DATABASE_HOST
@@ -120,7 +120,7 @@ ECSTaskDefinition:
               awslogs-group: !Ref LogGroup
               awslogs-stream-prefix: ecs
         - Name: conduktor-monitoring
-          Image: conduktor/conduktor-console-cortex:1.23.0
+          Image: conduktor/conduktor-console-cortex:1.24.0
           Environment:
             - Name: CDK_CONSOLE-URL
               Value: http://localhost:8080
