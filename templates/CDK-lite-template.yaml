@@ -3,7 +3,7 @@ Description: >-
   Create resources and deploy Conduktor
   As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
 
-  This template will assume you have a VPC (+subnet),Security Group, RDS Database and a ECS cluster running!
+  This template will assume you have a VPC (+subnet), Security Group, RDS Database and a ECS cluster running!
 
   This template will deploy the following:
   - Service (Fargate)
@@ -48,25 +48,25 @@ Parameters:
     Type: String
     AllowedPattern: .*:.*:.*:.*:.*
     Description: The endpoint for the database
-    
+
 Resources:
-  ECSService:    
+  ECSService:
     Type: AWS::ECS::Service
-    Properties: 
+    Properties:
       Cluster: !Ref ClusterArn
       DesiredCount: 1
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
-          SecurityGroups: 
+          SecurityGroups:
             - !Ref SecurityGroup
-          Subnets: 
+          Subnets:
             - !Ref Subnet
       TaskDefinition: !Ref 'ECSTaskDefinition'
       ServiceName: !Sub ${AWS::StackName}-conduktor-ecs-service
-  
-ECSTaskDefinition:
+
+  ECSTaskDefinition:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
       Family: conduktor-console
@@ -81,7 +81,7 @@ ECSTaskDefinition:
         OperatingSystemFamily: LINUX
       ContainerDefinitions:
         - Name: conduktor-console
-          Image: conduktor/conduktor-console:1.26.0
+          Image: conduktor/conduktor-console:1.28.0
           Essential: true
           Environment:
             - Name: CDK_DATABASE_HOST
@@ -120,7 +120,7 @@ ECSTaskDefinition:
               awslogs-group: !Ref LogGroup
               awslogs-stream-prefix: ecs
         - Name: conduktor-monitoring
-          Image: conduktor/conduktor-console-cortex:1.26.0
+          Image: conduktor/conduktor-console-cortex:1.28.0
           Environment:
             - Name: CDK_CONSOLE-URL
               Value: http://localhost:8080
@@ -150,7 +150,7 @@ ECSTaskDefinition:
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: Sub ${AWS::StackName}-conduktor-lite
+      LogGroupName: !Sub ${AWS::StackName}-conduktor-lite
       Tags:
         - Key: Name
           Value: ConduktorConsoleLogGroup

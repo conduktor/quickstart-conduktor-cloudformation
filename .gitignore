@@ -1,0 +1,75 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+
+# Virtual environment folder
+venv/
+.venv/
+
+# Environment variable files
+.env
+.env.*
+
+# CloudFormation generated files (Optional)
+*.stack-template.json
+*.stack-template.yaml
+*.stack-template.yml
+
+# Logs
+*.log
+
+# MacOS metadata files
+.DS_Store
+
+# Linux temporary files
+*.swp
+*.swo
+
+# Windows metadata files
+Thumbs.db
+Desktop.ini
+
+# PyCharm project files
+.idea/
+
+# VS Code settings
+.vscode/
+
+# Test coverage reports
+htmlcov/
+*.cover
+*.coverage
+*.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.lcov
+
+# pytest cache directory
+.pytest_cache/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Python egg files
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+wheels/
+share/python-wheels/
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Cfn-lint cache files
+.cache/
