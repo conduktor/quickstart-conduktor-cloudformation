@@ -53,7 +53,7 @@ Resources:
   ECSService:
     Type: AWS::ECS::Service
     Properties:
-      Cluster: !Ref 'ClusterArn'
+      Cluster: !Ref ClusterArn
       DesiredCount: 1
       LaunchType: FARGATE
       NetworkConfiguration:
