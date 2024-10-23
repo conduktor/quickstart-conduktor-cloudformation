@@ -12,6 +12,5 @@ repos:
         description: Lint CloudFormation templates using cfn-lint
         entry: cfn-lint
         language: python
-        types: [yaml, json]  # Specify the file types
-        # files: ^templates/.*\.(yaml|yml|json)$  # Ensure it only checks files in the 'templates' folder
-        files: templates/.*
+        types: [yaml, json]
+        files: ^templates/.*\.(yaml|yml|json)$  # Apply to all YAML/JSON files in templates directory
