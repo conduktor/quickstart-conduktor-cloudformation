@@ -1,7 +1,7 @@
 version: '3.8'
 
-services:  
-  
+services:
+
   postgresql:
     image: postgres:14
     hostname: postgresql
@@ -84,7 +84,7 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
-  
+
   conduktor-gateway:
     image: conduktor/conduktor-gateway:2.6.1
     hostname: conduktor-gateway
@@ -100,7 +100,7 @@ services:
     depends_on:
       redpanda-0:
         condition: service_healthy
-  
+
   conduktor-data-generator:
     image: conduktor/conduktor-data-generator:0.3
     container_name: conduktor-data-generator

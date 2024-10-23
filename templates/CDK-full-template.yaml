@@ -1,5 +1,4 @@
 AWSTemplateFormatVersion: 2010-09-09
-
 Description: >-
   Create resources and deploy Conduktor
   As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
@@ -87,21 +86,21 @@ Resources:
       Tags:
         - Key: Name
           Value: ConduktorConsoleInternetGateway
-  
+
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
-  
+
   RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
-  
+
   PublicRoute:
     Type: AWS::EC2::Route
-    DependsOn: 
+    DependsOn:
       - AttachGateway
     Properties:
       RouteTableId: !Ref RouteTable
@@ -124,18 +123,18 @@ Resources:
       - CapacityProvider: FARGATE
         Weight: 1
 
-  ECSService:    
+  ECSService:
     Type: AWS::ECS::Service
-    Properties: 
+    Properties:
       Cluster: !Ref ECSCluster
       DesiredCount: 1
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
-          SecurityGroups: 
+          SecurityGroups:
             - !Ref SecurityGroup
-          Subnets: 
+          Subnets:
             - !Ref PublicSubnet
       TaskDefinition: !Ref 'ECSTaskDefinition'
       ServiceName: !Sub ${AWS::StackName}-conduktor-ecs-service
@@ -155,7 +154,7 @@ Resources:
         OperatingSystemFamily: LINUX
       ContainerDefinitions:
         - Name: conduktor-console
-          Image: conduktor/conduktor-console:1.26.0
+          Image: conduktor/conduktor-console:1.28.0
           Essential: true
           Environment:
             - Name: CDK_DATABASE_HOST
@@ -194,7 +193,7 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-stream-prefix: ecs
         - Name: conduktor-monitoring
-          Image: conduktor/conduktor-console-cortex:1.26.0
+          Image: conduktor/conduktor-console-cortex:1.28.0
           Environment:
             - Name: CDK_CONSOLE-URL
               Value: http://localhost:8080
