@@ -1,15 +1,15 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: >-
+Description: |
   Create resources and deploy Conduktor
   As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
 
-  This template will assume you have a VPC (+subnet), Security Group, RDS Database and a ECS cluster running!
+  This template will assume you have a VPC (+subnet), Security Group, RDS Database (with Password stored via Secret Manager) and a ECS cluster running!
 
   This template will deploy the following:
   - Service (Fargate)
   - Service Task
   - Log group for your service
-  - IAM (ECS Task Execution Role)
+  - IAM Role and Policy (ECS Task Execution Role)
 
   **Please fill the values below**
 
@@ -29,6 +29,16 @@ Parameters:
     AllowedPattern: subnet-.*
     Description: The Subnet you want to use for this ECS service
 
+  ConduktorConsoleCPU:
+    Type: Number
+    Default: 2048
+    Description: The amount of CPU units to allocate to the Conduktor Console ECS task
+
+  ConduktorConsoleMemory:
+    Type: Number
+    Default: 4096
+    Description: The amount of memory to allocate to the Conduktor Console ECS task
+
   DatabaseName:
     Type: String
     AllowedPattern: .+
@@ -43,11 +53,17 @@ Parameters:
     Type: String
     AllowedPattern: .+
     Description: The password for the database
+    NoEcho: true
 
   DatabaseEndpoint:
     Type: String
     AllowedPattern: .*:.*:.*:.*:.*
     Description: The endpoint for the database
+
+Mappings:
+  Template:
+    Version:
+      value: 'CF_TEMPLATE_VERSION'
 
 Resources:
   ECSService:
@@ -74,14 +90,14 @@ Resources:
         - FARGATE
       NetworkMode: awsvpc
       ExecutionRoleArn: !Ref ECSTaskExecutionRole
-      Cpu: '2048'
-      Memory: '4096'
+      Cpu: !Ref ConduktorConsoleCPU
+      Memory: !Ref ConduktorConsoleMemory
       RuntimePlatform:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       ContainerDefinitions:
         - Name: conduktor-console
-          Image: conduktor/conduktor-console:1.28.0
+          Image: conduktor/conduktor-console:1.29.1
           Essential: true
           Environment:
             - Name: CDK_DATABASE_HOST
@@ -102,14 +118,17 @@ Resources:
               Value: !Ref DatabaseName
             - Name: CDK_MONITORING_NOTIFICATIONS-CALLBACK-URL
               Value: http://localhost:8080
+            - Name: DEPLOYED_BY
+              Value: !Sub
+                - "CloudFormation/${version}"
+                - {version: !FindInMap [Template, Version, value]}
           PortMappings:
             - Name: console-8080-tcp
               ContainerPort: 8080
               HostPort: 8080
               Protocol: tcp
           HealthCheck:
-            Command: ['CMD-SHELL',
-                    'curl --fail http://localhost:${CDK_LISTENING_PORT:-8080}/platform/api/modules/health/live']
+            Command: ['CMD-SHELL', '/opt/conduktor/scripts/healthcheck.sh']
             Interval: 5
             Retries: 2
             Timeout: 3
@@ -120,7 +139,7 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-stream-prefix: ecs
         - Name: conduktor-monitoring
-          Image: conduktor/conduktor-console-cortex:1.28.0
+          Image: conduktor/conduktor-console-cortex:1.29.1
           Environment:
             - Name: CDK_CONSOLE-URL
               Value: http://localhost:8080
@@ -135,8 +154,7 @@ Resources:
                 ContainerPort: 9009
                 HostPort: 9009
           HealthCheck:
-            Command: ['CMD-SHELL',
-                    'curl --fail http://localhost:${CDK_LISTENING_PORT:-8080}/platform/api/modules/health/live']
+            Command: ['CMD-SHELL', '/opt/conduktor/scripts/healthcheck.sh']
             Interval: 5
             Retries: 2
             Timeout: 3

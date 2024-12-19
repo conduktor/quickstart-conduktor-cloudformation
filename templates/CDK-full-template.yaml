@@ -1,14 +1,15 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: >-
+Description: |
   Create resources and deploy Conduktor
   As per: https://docs.conduktor.io/platform/installation/get-started/AWS/
 
   This template will deploy the following:
   - Networking resources (VPC, subnets and more) - Public and Private
   - Database (RDS instance with postgres engine)
+  - Secrets Manager secret for the database credentials
   - Cluster (ECS)
   - Service (Fargate)
-  - IAM (ECS Task Execution Role)
+  - IAM Role and Policy (ECS Task Execution Role)
 
 Parameters:
   PublicRegion:
@@ -31,28 +32,67 @@ Parameters:
     Default: conduktor
     Description: The username for the database
 
-  DatabasePassword:
+  DatabaseInstanceType:
     Type: String
-    Default: conduktor2143
-    Description: The password for the database
-    NoEcho: True
+    Default: db.t3.small
+    Description: The type of database to deploy see all values here https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.DBInstanceClass.Types.html
+
+  SecretName:
+    Type: String
+    Default: conduktor-rds-secret
+    Description: The name of the AWS Secrets Manager secret storing the database credentials
+
+  ConduktorConsoleCPU:
+    Type: Number
+    Default: 2048
+    Description: The amount of CPU units to allocate to the Conduktor Console ECS task
+
+  ConduktorConsoleMemory:
+    Type: Number
+    Default: 4096
+    Description: The amount of memory to allocate to the Conduktor Console ECS task
+
+  SecurityGroupIngressCIDR:
+    Type: String
+    Description: |
+      Please set CIDR to x.x.x.x/32 to allow one specific IP address access,
+      0.0.0.0/0 to allow all IP addresses access, or another CIDR range.
+      Use this to control access to the application and database ports.
+
+  VPCSubnetCIDR:
+    Type: String
+    Description: The CIDR block for the VPC and subnets. An example could be 10.10.0.0/16
+
+  VPCSubnetPublicCIDR:
+    Type: String
+    Description: The CIDR block for the public subnet. An example could be 10.10.1.0/24
+
+  VPCSubnetPrivateCIDR:
+    Type: String
+    Description: The CIDR block for the private subnet. An example could be 10.10.2.0/24
 
 Mappings:
-  SubnetConfig:
-    VPC:
-      CIDR: '10.10.0.0/16'
-    Public:
-      CIDR: '10.10.1.0/24'
-    Private:
-      CIDR: '10.10.2.0/24'
-    Destination:
-      CIDR: '0.0.0.0/0'
+  Template:
+    Version:
+     value: 'CF_TEMPLATE_VERSION'
 
 Resources:
+  Secret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref SecretName
+      Description: Database credentials for the Conduktor Console backend RDS instance
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username":"${DatabaseUsername}"}'
+        GenerateStringKey: 'password'
+        ExcludeCharacters: '/@\" ' # Symbols are not allowed for RDS database passwords
+        ExcludePunctuation: false  # Allow all other punctuation characters
+        PasswordLength: 16
+
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: !FindInMap ['SubnetConfig', 'VPC', 'CIDR']
+      CidrBlock: !Ref VPCSubnetCIDR
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
@@ -62,7 +102,7 @@ Resources:
   PublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: !FindInMap ['SubnetConfig', 'Public', 'CIDR']
+      CidrBlock: !Ref VPCSubnetPublicCIDR
       VpcId: !Ref VPC
       AvailabilityZone: !Ref PublicRegion
       MapPublicIpOnLaunch: true
@@ -73,10 +113,9 @@ Resources:
   PrivateSubnet:
     Type: AWS::EC2::Subnet
     Properties:
-      CidrBlock: !FindInMap ['SubnetConfig', 'Private', 'CIDR']
+      CidrBlock: !Ref VPCSubnetPrivateCIDR
       VpcId: !Ref VPC
       AvailabilityZone: !Ref PrivateRegion
-      MapPublicIpOnLaunch: true
       Tags:
        - Key: Name
          Value: ConduktorConsolePrivateSubnet
@@ -88,7 +127,7 @@ Resources:
         - Key: Name
           Value: ConduktorConsoleInternetGateway
 
-  AttachGateway:
+  AttachVPCGateway:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref VPC
@@ -102,10 +141,10 @@ Resources:
   PublicRoute:
     Type: AWS::EC2::Route
     DependsOn:
-      - AttachGateway
+      - AttachVPCGateway
     Properties:
       RouteTableId: !Ref RouteTable
-      DestinationCidrBlock: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+      DestinationCidrBlock: !Ref SecurityGroupIngressCIDR
       GatewayId: !Ref InternetGateway
 
   PublicSubnetAssociation:
@@ -113,6 +152,33 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref RouteTable
+
+  # DB needs two subnets in different AZs
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub ${AWS::StackName}-conduktor-db-subnet-group
+      SubnetIds:
+        - !Ref PublicSubnet
+        - !Ref PrivateSubnet
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub ${AWS::StackName}-conduktor-postgresql
+      DBName: !Ref DatabaseName
+      Engine: postgres
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref Secret, ':SecretString:password}}']]
+      AllocatedStorage: '5'
+      DBInstanceClass: !Ref DatabaseInstanceType
+      MultiAZ: false
+      AvailabilityZone: !Ref PublicRegion
+      VPCSecurityGroups:
+        - !Ref SecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
 
   ECSCluster:
     Type: 'AWS::ECS::Cluster'
@@ -148,42 +214,48 @@ Resources:
         - FARGATE
       NetworkMode: awsvpc
       ExecutionRoleArn: !Ref ECSTaskExecutionRole
-      Cpu: '2048'
-      Memory: '4096'
+      Cpu: !Ref ConduktorConsoleCPU
+      Memory: !Ref ConduktorConsoleMemory
       RuntimePlatform:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       ContainerDefinitions:
         - Name: conduktor-console
-          Image: conduktor/conduktor-console:1.28.0
+          Image: conduktor/conduktor-console:1.29.1
           Essential: true
           Environment:
             - Name: CDK_DATABASE_HOST
               Value: !GetAtt RDSInstance.Endpoint.Address
-            - Name: CDK_MONITORING_ALERT-MANAGER-URL
+            - Name: CDK_MONITORING_ALERTMANAGERURL
               Value: http://localhost:9010/
-            - Name: CDK_MONITORING_CORTEX-URL
+            - Name: CDK_MONITORING_CORTEXURL
               Value: http://localhost:9009/
             - Name: CDK_DATABASE_PORT
               Value: '5432'
             - Name: CDK_DATABASE_USERNAME
               Value: !Ref 'DatabaseUsername'
-            - Name: CDK_DATABASE_PASSWORD
-              Value: !Ref 'DatabasePassword'
-            - Name: CDK_MONITORING_CALLBACK-URL
+            - Name: CDK_MONITORING_CALLBACKURL
               Value: http://localhost:8080/monitoring/api/
             - Name: CDK_DATABASE_NAME
               Value: !Ref DatabaseName
-            - Name: CDK_MONITORING_NOTIFICATIONS-CALLBACK-URL
+            - Name: CDK_MONITORING_NOTIFICATIONSCALLBACKURL
               Value: http://localhost:8080
+            - Name: DEPLOYED_BY
+              Value: !Sub
+                - "CloudFormation/${version}"
+                - {version: !FindInMap [Template, Version, value]}
+          Secrets:
+            - Name: CDK_DATABASE_PASSWORD
+              # Needs to have :: at the end due to it being needed to denote to use default values.
+              # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/secrets-envvar-secrets-manager.html
+              ValueFrom: !Sub "${Secret}:password::"
           PortMappings:
             - Name: console-8080-tcp
               ContainerPort: 8080
               HostPort: 8080
               Protocol: tcp
           HealthCheck:
-            Command: ['CMD-SHELL',
-                    'curl --fail http://localhost:${CDK_LISTENING_PORT:-8080}/platform/api/modules/health/live']
+            Command: ['CMD-SHELL', '/opt/conduktor/scripts/healthcheck.sh']
             Interval: 5
             Retries: 2
             Timeout: 3
@@ -194,7 +266,7 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-stream-prefix: ecs
         - Name: conduktor-monitoring
-          Image: conduktor/conduktor-console-cortex:1.28.0
+          Image: conduktor/conduktor-console-cortex:1.29.1
           Environment:
             - Name: CDK_CONSOLE-URL
               Value: http://localhost:8080
@@ -209,8 +281,7 @@ Resources:
                 ContainerPort: 9009
                 HostPort: 9009
           HealthCheck:
-            Command: ['CMD-SHELL',
-                    'curl --fail http://localhost:${CDK_LISTENING_PORT:-8080}/platform/api/modules/health/live']
+            Command: ['CMD-SHELL', '/opt/conduktor/scripts/healthcheck.sh']
             Interval: 5
             Retries: 2
             Timeout: 3
@@ -238,23 +309,26 @@ Resources:
         - IpProtocol: tcp
           FromPort: 8080
           ToPort: 8080
-          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+          CidrIp: !Ref SecurityGroupIngressCIDR
         - IpProtocol: tcp
           FromPort: 9090
           ToPort: 9090
-          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+          CidrIp: !Ref SecurityGroupIngressCIDR
         - IpProtocol: tcp
           FromPort: 9010
           ToPort: 9010
-          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+          CidrIp: !Ref SecurityGroupIngressCIDR
         - IpProtocol: tcp
           FromPort: 9009
           ToPort: 9009
-          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+          CidrIp: !Ref SecurityGroupIngressCIDR
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
-          CidrIp: !FindInMap ['SubnetConfig', 'Destination', 'CIDR']
+          CidrIp: !Ref SecurityGroupIngressCIDR
+      SecurityGroupEgress:
+        - IpProtocol: "-1" # Allow all protocols
+          CidrIp: "0.0.0.0/0"
       Tags:
         - Key: Name
           Value: ConduktorConsoleSecurityGroup
@@ -271,39 +345,15 @@ Resources:
       ManagedPolicyArns:
       # https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonECSTaskExecutionRolePolicy.html
         - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies:
+      - PolicyName: !Sub ${AWS::StackName}-conduktor-secret-policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'secretsmanager:GetSecretValue'
+              Resource: !Ref Secret
       Tags:
         - Key: Name
           Value: ConduktorConsoleECSTaskExecutionRole
-
-#  DB needs two subnets in different AZs
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: !Sub ${AWS::StackName}-conduktor-db-subnet-group
-      SubnetIds:
-        - !Ref PublicSubnet
-        - !Ref PrivateSubnet
-
-  RDSInstance:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Snapshot
-    UpdateReplacePolicy: Snapshot
-    Properties:
-      DBInstanceIdentifier: !Sub ${AWS::StackName}-conduktor-postgresql
-      DBName: !Ref DatabaseName
-      Engine: postgres
-      MasterUsername: !Ref 'DatabaseUsername'
-      MasterUserPassword: !Ref 'DatabasePassword'
-      AllocatedStorage: '5'
-      DBInstanceClass: 'db.t3.small'
-      MultiAZ: false
-      AvailabilityZone: !Ref PublicRegion
-      VPCSecurityGroups:
-        - !Ref SecurityGroup
-      DBSubnetGroupName: !Ref DBSubnetGroup
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            # W1011 Use dynamic references over parameters for secrets - Will make story about this
-            - W1011
