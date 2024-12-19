@@ -1,6 +1,6 @@
 # Quickstart Conduktor CloudFormation
 
-> :warning: **This repository is deprecated**: This repository is no longer maintained. Please refer to the [Conduktor documentation](https://docs.conduktor.io/platform/category/deployment-options/) for the latest information.
+> :warning: **This repository is deprecated as of December 2024**: This repository is no longer maintained. Please refer to the [Conduktor documentation](https://docs.conduktor.io/platform/category/deployment-options/) for the latest information.
 
 This repository holds two AWS CloudFormation templates that enable you to deploy Conduktor in two different ways:
 
