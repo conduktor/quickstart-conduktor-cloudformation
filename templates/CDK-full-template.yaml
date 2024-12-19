@@ -9,7 +9,7 @@ Description: |
   - Secrets Manager secret for the database credentials
   - Cluster (ECS)
   - Service (Fargate)
-  - IAM (ECS Task Execution Role)
+  - IAM Role and Policy (ECS Task Execution Role)
 
 Parameters:
   PublicRegion:
